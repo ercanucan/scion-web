@@ -5,6 +5,7 @@ import os
 import hashlib
 from collections import deque
 from shutil import rmtree
+import time
 
 # External packages
 from django.contrib.auth.decorators import login_required
@@ -61,6 +62,8 @@ from lib.defines import DEFAULT_MTU
 from lib.defines import GEN_PATH, PROJECT_ROOT
 
 from ad_manager.util.hostfile_generator import generate_ansible_hostfile
+from ad_manager.util.defines import CLI_CONFIG, TMUX_CONFIG, HELP_MESSAGE,\
+    SET_PWD, SHOW_PWD, SHOW_ANSIBLE_COMMAND, SCION_WELCOME_ASCII, SHOW_WELCOME
 from scripts.reload_data import reload_data_from_files
 
 import subprocess
@@ -996,7 +999,8 @@ def deploy(request, isd_id, as_id):
     commit_hash = request.POST['commitHash']
     # deploy with Ansible
     if ansible_check(isd_id, as_id):
-        update_hash_var(isd_id, as_id, commit_hash)
+        if commit_hash != '':
+            update_hash_var(isd_id, as_id, commit_hash)
         run_remote_command(None, None, None, use_ansible=True)
     current_page = request.META.get('HTTP_REFERER')
     return redirect(current_page)
@@ -1029,11 +1033,13 @@ def run_remote_command(ip, process_name, command, use_ansible=True):
         # duplicating code to use the PlaybookExecutor
         result = "Call failed"
         try:
-            result = subprocess.check_call(['ansible-playbook',
-                                            os.path.join(PROJECT_ROOT,
-                                                         'ansible',
-                                                         'deploy-current.yml')],
-                                           cwd=PROJECT_ROOT)
+            command = ['gnome-terminal'] + CLI_CONFIG + ['-x', 'tmux']
+            result = subprocess.check_call(command)
+            if not result:
+                time.sleep(0.5)
+                command = ['tmux'] + TMUX_CONFIG + SET_PWD + SHOW_WELCOME + HELP_MESSAGE +\
+                    SHOW_PWD + SHOW_ANSIBLE_COMMAND
+                result += subprocess.check_call(command)
         except subprocess.CalledProcessError:
             print(result)
     return result
