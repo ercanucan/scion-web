@@ -89,6 +89,7 @@ class AD(models.Model):
     sig_priv_key = models.CharField(max_length=100, null=True, blank=True)
     enc_pub_key = models.CharField(max_length=100, null=True, blank=True)
     enc_priv_key = models.CharField(max_length=100, null=True, blank=True)
+    master_as_key = models.CharField(max_length=100, null=True, blank=True)
     certificate = models.TextField(null=True, blank=True)
     trc = models.TextField(null=True, blank=True)
 

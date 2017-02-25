@@ -13,6 +13,7 @@
 # limitations under the License.
 
 # Stdlib
+import base64
 import configparser
 import hashlib
 import json
@@ -27,15 +28,12 @@ import time
 import yaml
 from collections import deque
 from copy import deepcopy
-from shutil import (
-    copy,
-    copytree,
-    rmtree,
-)
+from shutil import rmtree
 from string import Template
 from urllib.parse import urljoin
 
 # External packages
+from Crypto import Random
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
@@ -53,11 +51,6 @@ from django.views.decorators.http import require_POST
 from django.views.generic import ListView, DetailView, FormView
 
 # SCION
-from lib.util import (
-    iso_timestamp,
-    read_file,
-    write_file,
-)
 from lib.crypto.certificate import Certificate
 from lib.crypto.certificate_chain import CertificateChain
 from lib.crypto.asymcrypto import (
@@ -65,17 +58,34 @@ from lib.crypto.asymcrypto import (
     generate_enc_keypair,
 )
 from lib.defines import (
+    AS_CONF_FILE,
     BEACON_SERVICE,
     CERTIFICATE_SERVICE,
+    DEFAULT_MTU,
+    GEN_PATH,
     PATH_SERVICE,
+    PROJECT_ROOT,
     ROUTER_SERVICE,
     SIBRA_SERVICE,
 )
-from lib.defines import DEFAULT_MTU
-from lib.defines import GEN_PATH, PROJECT_ROOT
-from lib.types import LinkType
 from lib.packet.scion_addr import ISD_AS
-from scripts.reload_data import reload_data_from_files
+from lib.types import LinkType
+from lib.util import (
+    copy_file,
+    get_cert_chain_file_path,
+    get_enc_key_file_path,
+    get_sig_key_file_path,
+    get_trc_file_path,
+    iso_timestamp,
+    read_file,
+    write_file,
+)
+from topology.generator import (
+    DEFAULT_PATH_POLICY_FILE,
+    INITIAL_CERT_VERSION,
+    INITIAL_TRC_VERSION,
+    PATH_POLICY_FILE,
+)
 
 # SCION-WEB
 from ad_manager.forms import (
@@ -95,7 +105,6 @@ from ad_manager.util.hostfile_generator import generate_ansible_hostfile
 from ad_manager.util.util import to_b64, from_b64
 from ad_manager.util.defines import (
     COORD_SERVICE_URI,
-    INITIAL_CERT_VERSION,
     POLL_JOIN_REPLY_SVC,
     POLL_EVENTS_SVC,
     SCION_SUGGESTED_PORT,
@@ -104,6 +113,7 @@ from ad_manager.util.defines import (
     UPLOAD_JOIN_REQUEST_SVC,
     UPLOAD_JOIN_REPLY_SVC,
 )
+from scripts.reload_data import reload_data_from_files
 
 
 GEN_PATH = os.path.join(PROJECT_ROOT, GEN_PATH)
@@ -241,6 +251,7 @@ def handle_join_reply(request, reply, jr_id):
         # so that we can save the keys into the AS table.
         jr = JoinRequest.objects.get(id=jr_id)
         new_as = ISD_AS(join_reply['JoiningIA'])
+        master_as_key = base64.b64encode(Random.new().read(16))
         # TODO(ercanucan): create the ISD in DB if it's not yet in DB
         AD.objects.update_or_create(
             as_id=int(new_as[1]),
@@ -252,7 +263,8 @@ def handle_join_reply(request, reply, jr_id):
             sig_pub_key=jr.sig_pub_key,
             sig_priv_key=jr.sig_priv_key,
             enc_pub_key=jr.enc_pub_key,
-            enc_priv_key=jr.enc_priv_key
+            enc_priv_key=jr.enc_priv_key,
+            master_as_key=master_as_key.decode("utf-8")
         )
         messages.success(request, 'Created new AS: %s.' % new_as)
     else:
@@ -1131,65 +1143,29 @@ def lookup_dict_executables():
 
 def create_local_gen(isd_as, tp):
     """
-    creates the usual gen folder structure for an ISD/AS under web_scion/gen,
+    Creates the usual gen folder structure for an ISD/AS under web_scion/gen,
     ready for Ansible deployment
-    Args:
-        isd_as: isd-as string
-        tp: the topology parameter file as a dict of dicts
-
+    :param str isd_as: ISD-AS as a string
+    :parm dict tp: the topology parameter file as a dict of dicts
     """
     # looks up the name of the executable for the service,
     # certificate server -> 'cert_server', ...
     lkx = lookup_dict_executables()
-
     isd_id, as_id = ISD_AS(isd_as)
-
     local_gen_path = os.path.join(WEB_ROOT, 'gen')
-
-    # Add the dispatcher folder in sub/web/gen/ if not already there
-    dispatcher_folder_path = os.path.join(local_gen_path, 'dispatcher')
-    if not os.path.exists(dispatcher_folder_path):
-        copytree(os.path.join(PROJECT_ROOT, 'deploy-gen', 'dispatcher'),
-                 dispatcher_folder_path)
-
-    # TODO: Cert distribution needs integration with scion-coord,
-    # using bruteforce copying over some gen certs and
-    # matching keys to get Ansible testing
-    # before integration with scion-coord
-    shared_files_path = os.path.join(local_gen_path, 'shared_files')
-
-    rmtree(os.path.join(shared_files_path), True)  # rm shared_files & content
-    # populate the shared_files folder with the relevant files for this AS
-    certgen_path = os.path.join(PROJECT_ROOT,
-                                'deploy-gen/ISD{}/AS{}/endhost/'.format(isd_id,
-                                                                        as_id))
-    copytree(certgen_path, shared_files_path)
-    # remove files that are not shared
-    try:
-        os.remove(os.path.join(shared_files_path, 'supervisord.conf'))
-    except OSError:
-        pass
-    try:
-        os.remove(os.path.join(shared_files_path, 'topology.yml'))
-    except OSError:
-        pass
+    write_dispatcher_config(local_gen_path)
     try:
         as_path = 'ISD{}/AS{}/'.format(isd_id, as_id)
         as_path = os.path.join(local_gen_path, as_path)
         rmtree(as_path, True)
     except OSError:
         pass
-
     types = ['beacon_server', 'certificate_server', 'router', 'path_server',
-             'sibra_server', 'zookeeper_service']  # 'domain_server', # tmp fix
-    # until the discovery replaces it
-
+             'sibra_server', 'zookeeper_service']
     dict_keys = ['BeaconServers', 'CertificateServers', 'BorderRouters',
                  'PathServers', 'SibraServers', 'Zookeepers']
-
     types_keys = zip(types, dict_keys)
     zk_name_counter = 1
-
     for service_type, type_key in types_keys:
         executable_name = lkx[service_type]
         replicas = tp[type_key].keys()  # SECURITY WARNING:allows arbitrary path
@@ -1197,72 +1173,30 @@ def create_local_gen(isd_as, tp):
         # Mitigation: make path at least relative
         executable_name = os.path.normpath('/'+executable_name).lstrip('/')
         for instance_name in replicas:
-            # replace instance_name if zookeeper special case
-            # (they have only ids)
+            # replace instance_name for zookeeper (they have only ids)
             if service_type == 'zookeeper_service':
-                instance_name = '{}{}-{}-{}'.format('zk', isd_id,
-                                                    as_id, zk_name_counter)
+                instance_name = 'zk%s-%s-%s' % (isd_id, as_id, zk_name_counter)
                 zk_name_counter += 1
             config = prep_supervisord_conf(executable_name, service_type,
                                            instance_name, isd_id, as_id)
-            # replace command entry if zookeeper special case
-            if service_type == 'zookeeper_service':
-                zk_config_path = os.path.join(PROJECT_ROOT,
-                                              'topology',
-                                              'Zookeeper.yml')
-                zk_config = {}
-                with open(zk_config_path, 'r') as stream:
-                    try:
-                        zk_config = yaml.load(stream)
-                    except (yaml.YAMLError, KeyError):
-                        zk_config = ''  # TODO: give user feedback, add TC
-                class_path = zk_config['Environment']['CLASSPATH']
-                zoomain_env = zk_config['Environment']['ZOOMAIN']
-                command_string = '"java" "-cp" ' \
-                                 '"gen/{1}/{2}/{0}:{3}" ' \
-                                 '"-Dzookeeper.' \
-                                 'log.file=logs/{0}.log" ' \
-                                 '"{4}" ' \
-                                 '"gen/ISD{1}/AS{2}/{0}/' \
-                                 'zoo.cfg"'.format(instance_name,
-                                                   isd_id,
-                                                   as_id,
-                                                   class_path,
-                                                   zoomain_env)
-                config['program:' + instance_name]['command'] = command_string
+            instance_path = 'ISD%s/AS%s/%s' % (isd_id, as_id, instance_name)
+            instance_path = os.path.join(local_gen_path, instance_path)
+            write_certs_trc_keys(isd_id, as_id, instance_path)
+            write_as_conf_and_path_policy(isd_id, as_id, instance_path)
+            write_supervisord_config(config, instance_path)
+            write_topology_file(tp, type_key, instance_path)
+            write_zlog_file(service_type, instance_name, instance_path)
+    write_endhost_config(tp, isd_id, as_id, local_gen_path)
 
-            node_path = 'ISD{}/AS{}/{}'.format(isd_id, as_id, instance_name)
-            node_path = os.path.join(local_gen_path, node_path)
-            # os.makedirs(node_path, exist_ok=True)
-            if not os.path.exists(node_path):
-                copytree(os.path.join(shared_files_path), node_path)
-            conf_file_path = os.path.join(node_path, 'supervisord.conf')
-            with open(conf_file_path, 'w') as configfile:
-                config.write(configfile)
 
-            # copy AS topology.yml file into node
-            one_of_topology_path = os.path.join(node_path, 'topology.yml')
-            one_of_topology = particular_topo_instance(tp, type_key)
-            with open(one_of_topology_path, 'w') as file:
-                yaml.dump(one_of_topology, file, default_flow_style=False)
-            # copy(yaml_topo_path, node_path)  # Do not share global topology
-            # as each node get its own topology file
-
-            # create zlog file
-            tmpl = Template(read_file(os.path.join(PROJECT_ROOT,
-                                                   "topology/zlog.tmpl")))
-            cfg = os.path.join(node_path, "%s.zlog.conf" % instance_name)
-            write_file(cfg, tmpl.substitute(name=service_type,
-                                            elem=instance_name))
-            # Generating only the needed intermediate parts
-            # not used as for now we generator.py all certs and keys resources
-
-    # Add endhost folder for all ASes
-    node_path = 'ISD{}/AS{}/{}'.format(isd_id, as_id, 'endhost')
-    node_path = os.path.join(local_gen_path, node_path)
-    if not os.path.exists(node_path):
-        copytree(os.path.join(shared_files_path), node_path)
-    copy(yaml_topo_path, node_path)
+def write_topology_file(tp, type_key, instance_path):
+    """
+    Writes the topology file into the instance's location.
+    """
+    one_of_topology_path = os.path.join(instance_path, 'topology.yml')
+    one_of_topology = particular_topo_instance(tp, type_key)
+    with open(one_of_topology_path, 'w') as file:
+        yaml.dump(one_of_topology, file, default_flow_style=False)
 
 
 def particular_topo_instance(tp, type_key):
@@ -1278,8 +1212,8 @@ def particular_topo_instance(tp, type_key):
                     'AddrInternal')
                 internal_port = singular_topo[server_type][entry].pop(
                     'PortInternal')
-                if type_key == 'BorderRouters':
-                    continue  # Border routers only know about external
+                if type_key in ('BorderRouters', 'endhost'):
+                    continue  # Routers and endhost only know about external
                 if internal_address != '':
                     singular_topo[server_type][entry]['Addr'] = internal_address
                 if internal_port is not None:
@@ -1322,6 +1256,8 @@ def prep_supervisord_conf(executable_name, service_type, instance_name,
                     '"gen/ISD%s/AS%s/%s" &>logs/%s.OUT\'')
         cmd = cmd_tmpl % (instance_name, isd_id, as_id,
                           instance_name, instance_name)
+    elif service_type == 'zookeeper_service':
+        cmd = prep_zk_supervisord_cmd(instance_name, isd_id, as_id)
     else:  # other infrastructure elements
         cmd_tmpl = ('bash -c \'exec "bin/%s" "%s" '
                     '"gen/ISD%s/AS%s/%s" &>logs/%s.OUT\'')
@@ -1340,3 +1276,160 @@ def prep_supervisord_conf(executable_name, service_type, instance_name,
         'autorestart': 'false'
     }
     return config
+
+
+def prep_zk_supervisord_cmd(instance_name, isd_id, as_id):
+    """
+    Generates the supervisord command for Zookeeper instances.
+    :param str instance_name: the instance of the service (e.g. zk1-8-1)
+    :param str isd_id: the ISD the service belongs to.
+    :param str as_id: the AS the service belongs to.
+    :returns str: Command section of Zookeeper supervisord config.
+    :rtype str
+    """
+    zk_config_path = os.path.join(PROJECT_ROOT,
+                                  'topology',
+                                  'Zookeeper.yml')
+    zk_config = {}
+    with open(zk_config_path, 'r') as stream:
+        zk_config = yaml.load(stream)
+    class_path = zk_config['Environment']['CLASSPATH']
+    zoomain_env = zk_config['Environment']['ZOOMAIN']
+    cmd_tmpl = ('"java" "-cp" "gen/%s/%s/%s:%s" '
+                '"-Dzookeeper.log.file=logs/%s.log" "%s" '
+                '"gen/ISD%s/AS%s/%s/zoo.cfg"')
+    cmd = cmd_tmpl % (isd_id, as_id, instance_name, class_path, instance_name,
+                      zoomain_env, isd_id, as_id, instance_name)
+    return cmd
+
+
+def prep_dispatcher_supervisord_conf():
+    """
+    Prepares the supervisord configuration for dispatcher.
+    :returns: supervisord configuration as a ConfigParser object
+    :rtype: ConfigParser
+    """
+    config = configparser.ConfigParser()
+    env = 'PYTHONPATH=.,ZLOG_CFG="gen/dispatcher/dispatcher.zlog.conf"'
+    cmd = 'bash -c \'exec "bin/dispatcher" &>logs/dispatcher.OUT\''
+    config['program:dispatcher'] = {
+        'priority': '50',
+        'environment': env,
+        'stdout_logfile': 'NONE',
+        'autostart': 'false',
+        'stderr_logfile': 'NONE',
+        'command':  cmd,
+        'startretries': '0',
+        'startsecs': '1',
+        'autorestart': 'false'
+    }
+    return config
+
+
+def write_endhost_config(tp, isd_id, as_id, local_gen_path):
+    """
+    Writes the endhost folder
+    """
+    endhost_path = os.path.join(local_gen_path,
+                                'ISD%s/AS%s/%s' % (isd_id, as_id, 'endhost'))
+    if not os.path.exists(endhost_path):
+        os.makedirs(endhost_path)
+    write_certs_trc_keys(isd_id, as_id, endhost_path)
+    write_as_conf_and_path_policy(isd_id, as_id, endhost_path)
+    write_topology_file(tp, 'endhost', endhost_path)
+
+
+def write_dispatcher_config(local_gen_path):
+    """
+    Creates the supervisord and zlog files for the dispatcher and writes
+    them into the dispatcher folder.
+    :param str local_gen_path: Location to create the dispatcher folder in.
+    """
+    disp_folder_path = os.path.join(local_gen_path, 'dispatcher')
+    if not os.path.exists(disp_folder_path):
+        os.makedirs(disp_folder_path)
+    disp_supervisord_conf = prep_dispatcher_supervisord_conf()
+    write_supervisord_config(disp_supervisord_conf, disp_folder_path)
+    write_zlog_file('dispatcher', 'dispatcher', disp_folder_path)
+
+
+def write_zlog_file(service_type, instance_name, instance_path):
+    """
+    Creates and writes the zlog configuration file for the given element.
+    :param str service_type: the type of the service (e.g. beacon_server).
+    :param str instance_name: the instance of the service (e.g. br1-8-1).
+    """
+    tmpl = Template(read_file(os.path.join(PROJECT_ROOT,
+                                           "topology/zlog.tmpl")))
+    cfg = os.path.join(instance_path, "%s.zlog.conf" % instance_name)
+    write_file(cfg, tmpl.substitute(name=service_type,
+                                    elem=instance_name))
+
+
+def write_supervisord_config(config, instance_path):
+    """
+    Writes the given supervisord config into the provided location.
+    :param ConfigParser config: supervisord configuration to write.
+    :param instance_path: the folder to write the config into.
+    """
+    if not os.path.exists(instance_path):
+        os.makedirs(instance_path)
+    conf_file_path = os.path.join(instance_path, 'supervisord.conf')
+    with open(conf_file_path, 'w') as configfile:
+        config.write(configfile)
+
+
+def write_certs_trc_keys(isd_id, as_id, instance_path):
+    """
+    Writes the certificate and the keys for the given service
+    instance of the given AS.
+    :param str isd_id: ISD the AS belongs to.
+    :param str as_id: AS for which the certs, TRC and keys will be written.
+    :param str instance_path: Location (in the file system) to write
+    the configuration into.
+    """
+    try:
+        ia = AD.objects.get(isd_id=isd_id, as_id=as_id)
+    except AD.DoesNotExist:
+        logger.error("AS %s-%s was not found." % (isd_id, as_id))
+        return
+    # write keys
+    sig_path = get_sig_key_file_path(instance_path)
+    enc_path = get_enc_key_file_path(instance_path)
+    write_file(sig_path, ia.sig_priv_key)
+    write_file(enc_path, ia.enc_priv_key)
+    # write cert
+    cert_chain_path = get_cert_chain_file_path(instance_path,
+                                               ISD_AS.from_values(isd_id,
+                                                                  as_id),
+                                               INITIAL_CERT_VERSION)
+    write_file(cert_chain_path, ia.certificate)
+    # write trc
+    trc_path = get_trc_file_path(instance_path, isd_id, INITIAL_TRC_VERSION)
+    write_file(trc_path, ia.trc)
+
+
+def write_as_conf_and_path_policy(isd_id, as_id, instance_path):
+    """
+    Writes AS configuration (i.e. as.yml) and path policy files.
+    :param str isd_id: ISD the AS belongs to.
+    :param str as_id: AS for which the configuration should be written.
+    :param str instance_path: Location (in the file system) to write
+    the configuration into.
+    """
+    try:
+        ia = AD.objects.get(isd_id=isd_id, as_id=as_id)
+    except AD.DoesNotExist:
+        logger.error("AS %s-%s was not found." % (isd_id, as_id))
+        return
+    conf = {
+        'MasterASKey': ia.master_as_key,
+        'RegisterTime': 5,
+        'PropagateTime': 5,
+        'CertChainVersion': 0,
+        'RegisterPath': True,
+    }
+    conf_file = os.path.join(instance_path, AS_CONF_FILE)
+    write_file(conf_file, yaml.dump(conf, default_flow_style=False))
+    path_policy_file = os.path.join(PROJECT_ROOT, DEFAULT_PATH_POLICY_FILE)
+    copy_file(path_policy_file, os.path.join(instance_path, PATH_POLICY_FILE))
