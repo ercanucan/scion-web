@@ -577,11 +577,11 @@ class ADDetailView(DetailView):
         ad = context['object']
 
         # Status tab
-        context['routers'] = ad.routerweb_set.select_related()
-        context['path_servers'] = ad.pathserverweb_set.all()
-        context['certificate_servers'] = ad.certificateserverweb_set.all()
-        context['beacon_servers'] = ad.beaconserverweb_set.all()
-        context['sibra_servers'] = ad.sibraserverweb_set.all()
+        context['service_servers'] = ad.service_set.select_related()
+        context['service_addrs'] = ad.serviceaddress_set.select_related()
+        context['border_routers'] = ad.borderrouter_set.select_related()
+        context['router_addrs'] = ad.borderrouteraddress_set.select_related()
+        context['interface_addrs'] = ad.borderrouterinterface_set.select_related()
 
         context['management_interface_ip'] = get_own_local_ip()
         context['reloaded_topology'] = ad.original_topology
@@ -594,9 +594,7 @@ class ADDetailView(DetailView):
         context['isdas'] = str(ISD_AS.from_values(ad.isd_id, ad.as_id))
 
         # Sort by name numerically
-        lists_to_sort = ['routers', 'path_servers',
-                         'certificate_servers', 'beacon_servers',
-                         'sibra_servers']
+        lists_to_sort = ['service_servers', 'border_routers']
         for list_name in lists_to_sort:
             context[list_name] = sorted(
                 context[list_name],

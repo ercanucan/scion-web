@@ -174,7 +174,6 @@ def generate_ansible_hostfile(topology_params, mockup_dict, isd_as,
                               ('SibraService', 'sibra_server'),
                               ('ZookeeperService', 'zookeeper_service')]:
         val = get_section_addr(mockup_dict, key)
-        print("debug val: %s" % val)
         if not val:  # skip empty entries
             continue
         hostnames = topology_params.getlist('inputHostname')

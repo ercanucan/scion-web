@@ -14,20 +14,21 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='BorderRouter',
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, verbose_name='ID', serialize=False)),
-                ('name', models.CharField(max_length=20, null=True)),
+                ('id', models.AutoField(serialize=False, primary_key=True, verbose_name='ID', auto_created=True)),
+                ('name', models.CharField(null=True, max_length=20)),
                 ('ad', models.ForeignKey(to='ad_manager.AD')),
             ],
         ),
         migrations.CreateModel(
             name='BorderRouterAddress',
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, verbose_name='ID', serialize=False)),
+                ('id', models.AutoField(serialize=False, primary_key=True, verbose_name='ID', auto_created=True)),
                 ('addr', models.GenericIPAddressField()),
-                ('port', models.IntegerField()),
+                ('port', models.IntegerField(null=True)),
                 ('overlay_port', models.IntegerField(null=True)),
-                ('addr_type', models.CharField(max_length=5, default='IPV4')),
+                ('addr_type', models.CharField(default='IPV4', max_length=5)),
                 ('is_public', models.BooleanField(default=True)),
+                ('ad', models.ForeignKey(to='ad_manager.AD')),
                 ('router', models.ForeignKey(to='ad_manager.BorderRouter')),
             ],
             options={
@@ -37,7 +38,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='BorderRouterInterface',
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, verbose_name='ID', serialize=False)),
+                ('id', models.AutoField(serialize=False, primary_key=True, verbose_name='ID', auto_created=True)),
                 ('addr', models.GenericIPAddressField()),
                 ('port', models.IntegerField()),
                 ('bind_addr', models.GenericIPAddressField(null=True, default=None)),
@@ -49,27 +50,29 @@ class Migration(migrations.Migration):
                 ('mtu', models.IntegerField()),
                 ('neighbor_isd_id', models.IntegerField(null=True)),
                 ('neighbor_as_id', models.IntegerField(null=True)),
-                ('neighbor_type', models.CharField(choices=[('CHILD', 'CHILD'), ('PARENT', 'PARENT'), ('PEER', 'PEER'), ('CORE', 'CORE')], max_length=10)),
+                ('neighbor_type', models.CharField(max_length=10, choices=[('CHILD', 'CHILD'), ('PARENT', 'PARENT'), ('PEER', 'PEER'), ('CORE', 'CORE')])),
+                ('ad', models.ForeignKey(to='ad_manager.AD')),
                 ('router_addr', models.ForeignKey(to='ad_manager.BorderRouterAddress')),
             ],
         ),
         migrations.CreateModel(
             name='Service',
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, verbose_name='ID', serialize=False)),
-                ('name', models.CharField(max_length=20, null=True)),
+                ('id', models.AutoField(serialize=False, primary_key=True, verbose_name='ID', auto_created=True)),
+                ('name', models.CharField(null=True, max_length=20)),
                 ('ad', models.ForeignKey(to='ad_manager.AD')),
             ],
         ),
         migrations.CreateModel(
             name='ServiceAddress',
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, verbose_name='ID', serialize=False)),
+                ('id', models.AutoField(serialize=False, primary_key=True, verbose_name='ID', auto_created=True)),
                 ('addr', models.GenericIPAddressField()),
-                ('port', models.IntegerField()),
+                ('port', models.IntegerField(null=True)),
                 ('overlay_port', models.IntegerField(null=True)),
-                ('addr_type', models.CharField(max_length=5, default='IPV4')),
+                ('addr_type', models.CharField(default='IPV4', max_length=5)),
                 ('is_public', models.BooleanField(default=True)),
+                ('ad', models.ForeignKey(to='ad_manager.AD')),
                 ('service', models.ForeignKey(to='ad_manager.Service')),
             ],
             options={

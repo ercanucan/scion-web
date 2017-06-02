@@ -149,6 +149,8 @@ function toggleInput(elem) {
 }
 
 function setLoadedTopology(reloadedTopology) {
+
+    console.log("inside set loaded topology");
     var isCore = reloadedTopology['Core'] == 'True';
     $('#inputIsCore.shownCheckbox').prop('checked', isCore);
     delete reloadedTopology['Core'];
@@ -160,8 +162,9 @@ function setLoadedTopology(reloadedTopology) {
     delete reloadedTopology['ISD_AS']; // set by template
 
     for (var entryKey in reloadedTopology) {
-        if (entryKey.endsWith("Servers")) {
-            reloadServerSection(reloadedTopology, entryKey);
+        if (entryKey.endsWith("Service") && !entryKey.startsWith("Zookeeper")) {
+            console.log(entryKey)
+            reloadServiceSection(reloadedTopology, entryKey);
             delete reloadedTopology[entryKey]; // remove entry
         }
     }
@@ -169,11 +172,13 @@ function setLoadedTopology(reloadedTopology) {
     reloadRouterSection(reloadedTopology);
     delete reloadedTopology['BorderRouters'];
 
-    var zookeepers = reloadedTopology['Zookeepers'];
+    var zookeepers = reloadedTopology['ZookeeperService'];
     reloadZookeeperSection(zookeepers);
 }
 
-function reloadServerSection(reloadedTopology, entryKey) {
+function reloadServiceSection(reloadedTopology, entryKey) {
+
+    console.log("inside set reload service section");
     var names;
     var name;
 
@@ -184,29 +189,31 @@ function reloadServerSection(reloadedTopology, entryKey) {
     var portInternal;
 
     var entry = reloadedTopology[entryKey];
-    var type = entryKey.slice(0, -7); // remove the 'Server' part
-    //var typeValue = type.toLowerCase() + '_server';
-    //$('#input'+type+'ServerType').attr('value', typeValue); // typeValue already set in template
+    var type = entryKey.slice(0, -7); // remove the 'Service' part
+    console.log("type" + type)
     names = Object.keys(entry); // get a list of keys
 
     for (var i in names) {
         name = names[i];
+        console.log(name);
         if (i > 0) {
             // if more than one entry, create additional form input
-            $('.' + type + 'Item' + ':last').find('.btn-success').click()
+            $('.' + type + 'Item' + ':last').find('.btn-success').click();
         }
         // fill form values
         var itemSelector = '#' + type + 'Item-' + (parseInt(i) + 1).toString(); // get a 1 based selector
         $(itemSelector + ' #input' + type + 'ServerName').val(name);
         server = entry[name];
-        address = server['Addr'];
+        address = server['Public'][0]['Addr'];
         $(itemSelector + ' #input' + type + 'ServerAddress').val(address);
-        port = server['Port'];
+        port = server['Public'][0]['L4Port'];
         $(itemSelector + ' #input' + type + 'ServerPort').val(port);
-        addressInternal = server['AddrInternal'];
-        $(itemSelector + ' #input' + type + 'ServerInternalAddress').val(addressInternal);
-        portInternal = server['PortInternal'];
-        $(itemSelector + ' #input' + type + 'ServerInternalPort').val(portInternal);
+        if ('Bind' in server) {
+            addressInternal = server['Bind'][0]['Addr'];
+            $(itemSelector + ' #input' + type + 'ServerInternalAddress').val(addressInternal);
+            portInternal = server['Bind'][0]['L4Port'];
+            $(itemSelector + ' #input' + type + 'ServerInternalPort').val(portInternal);
+        }
     }
 }
 
@@ -220,7 +227,7 @@ function reloadZookeeperSection(zookeepers) {
         //$('#inputZookeeperServerType').attr('value', 'zookeeper_server'); // already set
         address = server['Addr'];
         $('#inputZookeeperServerAddress').attr('value', address);
-        port = server['Port'];
+        port = server['L4Port'];
         $('#inputZookeeperServerPort').attr('value', port);
     }
 }
@@ -242,22 +249,26 @@ function reloadRouterSection(reloadedTopology) {
         }
         itemSelector = '#' + type + 'Item-' + (parseInt(borderRouterIndex) + 1).toString() + ' ';
         $(itemSelector + '#inputBorderRouterName').attr('value', name);
-        address = borderRouter['Addr'];
+        address = borderRouter['InternalAddrs'][0]['Public'][0]['Addr'];
         $(itemSelector + '#inputBorderRouterAddress').attr('value', address);
         $(itemSelector + '#inputBorderRouterAddress').val(address);
-        port = borderRouter['Port'];
+        port = borderRouter['InternalAddrs'][0]['Public'][0]['L4Port'];
         $(itemSelector + '#inputBorderRouterPort').attr('value', port);
 
-        var interface_obj = borderRouter['Interface'];
-        reloadRouterInterfaceSection(interface_obj, itemSelector);
+        var interfaces_obj = borderRouter['Interfaces'];
+        var keys = Object.keys(interfaces_obj)
+        reloadRouterInterfaceSection(keys[0], interfaces_obj[keys[0]], itemSelector);
 
         borderRouterIndex++;
     }
 }
 
-function reloadRouterInterfaceSection(interface_obj, itemSelector) {
+function reloadRouterInterfaceSection(if_id, interface_obj, itemSelector) {
     for (var interfaceKey in interface_obj) {
+        console.log(interfaceKey)
         var value = interface_obj[interfaceKey];
+        $(itemSelector + '#inputInterfaceIFID').attr('value', if_id);
+        console.log(value)
         switch (interfaceKey) {
             case 'ISD_AS':
                 $(itemSelector + '#inputInterfaceRemoteName').attr('value', value);
@@ -276,17 +287,20 @@ function reloadRouterInterfaceSection(interface_obj, itemSelector) {
             case 'MTU':
                 $(itemSelector + '#inputLinkMTU').attr('value', value);
                 break;
-            case 'ToAddr':
-                $(itemSelector + '#inputInterfaceRemoteAddress').attr('value', value);
+            case 'Public':
+                $(itemSelector + '#inputInterfaceAddr').attr('value', value['Addr']);
+                $(itemSelector + '#inputInterfaceOwnPort').attr('value', value['L4Port']);
                 break;
-            case 'ToUdpPort':
-                $(itemSelector + '#inputInterfaceRemotePort').attr('value', value);
+            case 'Remote':
+                $(itemSelector + '#inputInterfaceRemoteAddress').attr('value', value['Addr']);
+                $(itemSelector + '#inputInterfaceRemotePort').attr('value', value['L4Port']);
                 break;
-            case 'UdpPort':
-                $(itemSelector + '#inputInterfaceOwnPort').attr('value', value);
+            case 'Bandwidth':
+                $(itemSelector + '#inputInterfaceBandwidth').attr('value', value);
                 break;
             default: // Addr, Bandwidth, IFID
-                $(itemSelector + '#inputInterface' + interfaceKey).attr('value', value);
+                //$(itemSelector + '#inputInterface' + interfaceKey).attr('value', value);
+                break;
         }
     }
 }

@@ -166,7 +166,8 @@ class AD(models.Model):
                             port=router['InternalAddrs'][i][attr][j]['L4Port'],
                             addr_type="IPv4",
                             is_public=(attr=='Public'),
-                            router=br_obj
+                            router=br_obj,
+                            ad=self
                         )
                         br_addr_idx.append(br_addr_obj)
 
@@ -184,7 +185,8 @@ class AD(models.Model):
                     neighbor_isd_id=isd_id,
                     neighbor_as_id=as_id,
                     neighbor_type=intf["LinkType"],
-                    router_addr=br_addr_obj
+                    router_addr=br_addr_obj,
+                    ad=self
                     )
                 if 'Bind' in intf.keys():
                     br_inft_obj.update(
@@ -212,7 +214,8 @@ class AD(models.Model):
                         port=service[attr][i]["L4Port"],
                         addr_type="IPv4",
                         is_public=(attr=='Public'),
-                        service=srv_obj
+                        service=srv_obj,
+                        ad=self
                     )
 
     def fill_from_topology(self, topology_dict, clear=False, auto_refs=False):
@@ -267,10 +270,11 @@ class AD(models.Model):
 
 class AddressElement(models.Model):
     addr = models.GenericIPAddressField()
-    port = models.IntegerField()
+    port = models.IntegerField(null=True)
     overlay_port = models.IntegerField(null=True)
     addr_type = models.CharField(max_length=5, default="IPV4")
     is_public = models.BooleanField(default=True)
+    ad = models.ForeignKey(AD)
 
     class Meta:
         abstract = True
@@ -314,6 +318,7 @@ class BorderRouterInterface(models.Model):
     neighbor_as_id = models.IntegerField(null=True)
     neighbor_type = models.CharField(max_length=10, choices=NEIGHBOR_TYPES)
     router_addr = models.ForeignKey(BorderRouterAddress)
+    ad = models.ForeignKey(AD)
 
 
 class SCIONWebElement(models.Model):
