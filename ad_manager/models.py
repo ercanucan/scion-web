@@ -112,19 +112,19 @@ class AD(models.Model):
         out_dict.update({
             'ISDID': int(self.isd_id), 'ADID': int(self.as_id),
             'Core': int(self.is_core_ad),
-            'BorderRouters': {}, 'PathServers': {}, 'BeaconServers': {},
-            'CertificateServers': {}, 'SibraServers': {},
+            'BorderRouters': {}, 'PathService': {}, 'BeaconService': {},
+            'CertificateService': {}, 'SibraService': {},
         })
         for router in self.routerweb_set.all():
             out_dict['BorderRouters'][str(router.name)] = router.get_dict()
         for ps in self.pathserverweb_set.all():
-            out_dict['PathServers'][str(ps.name)] = ps.get_dict()
+            out_dict['PathService'][str(ps.name)] = ps.get_dict()
         for bs in self.beaconserverweb_set.all():
-            out_dict['BeaconServers'][str(bs.name)] = bs.get_dict()
+            out_dict['BeaconService'][str(bs.name)] = bs.get_dict()
         for cs in self.certificateserverweb_set.all():
-            out_dict['CertificateServers'][str(cs.name)] = cs.get_dict()
+            out_dict['CertificateService'][str(cs.name)] = cs.get_dict()
         for sb in self.sibraserverweb_set.all():
-            out_dict['SibraServers'][str(sb.name)] = sb.get_dict()
+            out_dict['SibraService'][str(sb.name)] = sb.get_dict()
         return out_dict
 
     def get_all_elements(self):
@@ -141,6 +141,79 @@ class AD(models.Model):
         all_elements = self.get_all_elements()
         element_ids = [element.id_str() for element in all_elements]
         return element_ids
+
+    def fill_router_info(self, router_dict):
+        """
+        Update the router information in the database. (i.e., BorderRouter,
+        BorderRouterAddress and BorderRouterInterface tables.)
+        : param dict router_dict: topo_dict['BorderRouters']
+        """
+        attrs = ['Public', 'Bind']
+        for name, router in router_dict.items():
+            br_obj, _ = BorderRouter.objects.update_or_create(
+                name=name,
+                ad=self
+            )
+            br_addr_idx = []
+            for i in range(len(router['InternalAddrs'])):
+                for attr in attrs:
+                    if attr not in router['InternalAddrs'][i].keys():
+                        continue
+                    for j in range(len(router['InternalAddrs'][i][attr])):
+                        br_addr_obj, _ = BorderRouterAddress.objects.\
+                        update_or_create(
+                            addr=router['InternalAddrs'][i][attr][j]['Addr'],
+                            port=router['InternalAddrs'][i][attr][j]['L4Port'],
+                            addr_type="IPv4",
+                            is_public=(attr=='Public'),
+                            router=br_obj
+                        )
+                        br_addr_idx.append(br_addr_obj)
+
+            for if_id, intf in router["Interfaces"].items():
+                isd_id, as_id = ISD_AS(intf["ISD_AS"])
+                br_addr_obj = br_addr_idx[intf['InternalAddrIdx']]
+                br_inft_obj, _ = BorderRouterInterface.objects.update_or_create(
+                    addr=intf['Public']['Addr'],
+                    port=intf['Public']['L4Port'],
+                    remote_addr=intf['Remote']['Addr'],
+                    remote_port=intf['Remote']['L4Port'],
+                    interface_id=if_id,
+                    bandwidth=intf['Bandwidth'],
+                    mtu=intf['MTU'],
+                    neighbor_isd_id=isd_id,
+                    neighbor_as_id=as_id,
+                    neighbor_type=intf["LinkType"],
+                    router_addr=br_addr_obj
+                    )
+                if 'Bind' in intf.keys():
+                    br_inft_obj.update(
+                        bind_addr=intf['Public']['Addr'],
+                        bind_port=intf['Public']['L4Port'],
+                    )
+
+    def fill_service_info(self, service_dict):
+        """
+        Update the service information in the database. 
+        (i.e., Service and ServiceAddress tables.)
+        : param dict service_dict: (e.g., topo_dict['BeaconService'])
+        """
+        attrs = ['Public', 'Bind']
+        for name, service in service_dict.items():
+            srv_obj, _ = Service.objects.\
+                update_or_create(name=name, ad=self)
+            for attr in attrs:
+                if attr not in service.keys():
+                    continue
+                for i in range(len(service[attr])):
+                    srv_addr_obj, _ = ServiceAddress.objects.\
+                    update_or_create(
+                        addr=service[attr][i]["Addr"],
+                        port=service[attr][i]["L4Port"],
+                        addr_type="IPv4",
+                        is_public=(attr=='Public'),
+                        service=srv_obj
+                    )
 
     def fill_from_topology(self, topology_dict, clear=False, auto_refs=False):
         """
@@ -161,66 +234,18 @@ class AD(models.Model):
         self.save()
 
         routers = topology_dict["BorderRouters"]
-        beacon_servers = topology_dict["BeaconServers"]
-        certificate_servers = topology_dict["CertificateServers"]
-        path_servers = topology_dict["PathServers"]
-        sibra_servers = topology_dict["SibraServers"]
+        beacon_servers = topology_dict["BeaconService"]
+        certificate_servers = topology_dict["CertificateService"]
+        path_servers = topology_dict["PathService"]
+        sibra_servers = topology_dict["SibraService"]
 
         try:
-            for name, router in routers.items():
-                interface = router["Interface"]
-                isd_id, as_id = ISD_AS(interface["ISD_AS"])
-                RouterWeb.objects.update_or_create(
-                    addr=router["Addr"], ad=self,
-                    port=router["Port"],
-                    addr_internal='',
-                    port_internal=None,
-                    name=name,
-                    neighbor_isd_id=isd_id,
-                    neighbor_as_id=as_id,
-                    neighbor_type=interface["LinkType"],
-                    interface_addr=interface["Addr"],
-                    interface_toaddr=interface["ToAddr"],
-                    interface_id=interface["IFID"],
-                    interface_port=interface["UdpPort"],
-                    interface_toport=interface["ToUdpPort"],
-                )
+            self.fill_router_info(routers)
+            self.fill_service_info(beacon_servers)
+            self.fill_service_info(certificate_servers)
+            self.fill_service_info(path_servers)
+            self.fill_service_info(sibra_servers)
 
-            for name, bs in beacon_servers.items():
-                BeaconServerWeb.objects.\
-                    update_or_create(addr=bs["Addr"],
-                                     port=bs["Port"],
-                                     addr_internal=bs["AddrInternal"],
-                                     port_internal=bs["PortInternal"],
-                                     name=name,
-                                     ad=self)
-
-            for name, cs in certificate_servers.items():
-                CertificateServerWeb.objects.\
-                    update_or_create(addr=cs["Addr"],
-                                     port=cs["Port"],
-                                     addr_internal=cs["AddrInternal"],
-                                     port_internal=cs["PortInternal"],
-                                     name=name,
-                                     ad=self)
-
-            for name, ps in path_servers.items():
-                PathServerWeb.objects.\
-                    update_or_create(addr=ps["Addr"],
-                                     port=ps["Port"],
-                                     addr_internal=ps["AddrInternal"],
-                                     port_internal=ps["PortInternal"],
-                                     name=name,
-                                     ad=self)
-
-            for name, sb in sibra_servers.items():
-                SibraServerWeb.objects.\
-                    update_or_create(addr=sb["Addr"],
-                                     port=sb["Port"],
-                                     addr_internal=sb["AddrInternal"],
-                                     port_internal=sb["PortInternal"],
-                                     name=name,
-                                     ad=self)
         except IntegrityError:
             logging.warning("Integrity error in AD.fill_from_topology(): "
                             "ignoring")
@@ -238,6 +263,57 @@ class AD(models.Model):
 
     def __str__(self):
         return '{}-{}'.format(self.isd.id, self.as_id)
+
+
+class AddressElement(models.Model):
+    addr = models.GenericIPAddressField()
+    port = models.IntegerField()
+    overlay_port = models.IntegerField(null=True)
+    addr_type = models.CharField(max_length=5, default="IPV4")
+    is_public = models.BooleanField(default=True)
+
+    class Meta:
+        abstract = True
+
+
+class Service(models.Model):
+    ad = models.ForeignKey(AD)
+    name = models.CharField(max_length=20, null=True)
+
+
+class ServiceAddress(AddressElement):
+    service = models.ForeignKey(Service)
+
+
+class BorderRouter(models.Model):
+    ad = models.ForeignKey(AD)
+    name = models.CharField(max_length=20, null=True)
+
+
+class BorderRouterAddress(AddressElement):
+    router = models.ForeignKey(BorderRouter)
+
+
+class BorderRouterInterface(models.Model):
+    addr = models.GenericIPAddressField()
+    port = models.IntegerField()
+    bind_addr = models.GenericIPAddressField(default=None, null=True)
+    bind_port = models.IntegerField(default=None, null=True)
+    remote_addr = models.GenericIPAddressField(null=True)
+    remote_port = models.IntegerField(null=True)
+    interface_id = models.IntegerField()
+    bandwidth = models.IntegerField()
+    mtu = models.IntegerField()
+    NEIGHBOR_TYPES = (
+        ('CHILD',) * 2,
+        ('PARENT',) * 2,
+        ('PEER',) * 2,
+        ('CORE',) * 2,
+    )
+    neighbor_isd_id = models.IntegerField(null=True)
+    neighbor_as_id = models.IntegerField(null=True)
+    neighbor_type = models.CharField(max_length=10, choices=NEIGHBOR_TYPES)
+    router_addr = models.ForeignKey(BorderRouterAddress)
 
 
 class SCIONWebElement(models.Model):

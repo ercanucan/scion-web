@@ -59,7 +59,7 @@ from lib.defines import (
 from lib.packet.scion_addr import ISD_AS
 from lib.types import LinkType
 from lib.util import iso_timestamp
-from topology.generator import INITIAL_CERT_VERSION
+from topology.generator import INITIAL_CERT_VERSION, _topo_json_to_yaml
 
 # SCION-WEB
 from ad_manager.forms import (
@@ -867,6 +867,7 @@ def wrong_api_call(request):
 
 static_tmp_path = os.path.join(WEB_ROOT, 'ad_manager', 'static', 'tmp')
 yaml_topo_path = os.path.join(static_tmp_path, 'topology.yml')
+json_topo_path = os.path.join(static_tmp_path, 'topology.json')
 
 
 def st_int(s, default):
@@ -880,11 +881,28 @@ def name_entry_dict(name_l, address_l, port_l, addr_int_l, port_int_l):
     for i in range(len(name_l)):
         if address_l[i] == '':
             continue  # don't include empty entries
+        ret_dict[name_l[i]] = {
+            'Public': [{
+                'Addr': address_l[i],
+                'L4Port': st_int(port_l[i],SCION_SUGGESTED_PORT),
+            }]
+        }
+        if addr_int_l[i] is not '':
+            ret_dict[name_l[i]]['Bind'] = [{
+                'Addr': addr_int_l[i],
+                'L4Port': st_int(port_int_l[i], None),
+            }]
+    return ret_dict
+
+
+def name_entry_dict_zk(name_l, address_l, port_l, addr_int_l, port_int_l):
+    ret_dict = {}
+    for i in range(len(name_l)):
+        if address_l[i] == '':
+            continue  # don't include empty entries
         ret_dict[name_l[i]] = {'Addr': address_l[i],
-                               'Port': st_int(port_l[i],
-                                              SCION_SUGGESTED_PORT),
-                               'AddrInternal': addr_int_l[i],
-                               'PortInternal': st_int(port_int_l[i], None)
+                               'L4Port': st_int(port_l[i],
+                                                SCION_SUGGESTED_PORT),
                                }
     return ret_dict
 
@@ -908,18 +926,33 @@ def name_entry_dict_router(tp):
         if address_list[i] == '':
             continue  # don't include empty entries
         ret_dict[name_list[i]] = {
-            'Addr': address_list[i],
-            'Port': st_int(port_list[i], None),
-            'Interface': {
-                'Addr': interface_list[i],
-                'Bandwidth': st_int(bandwidth_list[i], None),
-                'IFID': st_int(if_id_list[i], None),
-                'ISD_AS': remote_name_list[i],
-                'LinkType': interface_type_list[i],
-                'MTU': st_int(link_mtu_list[i], None),
-                'ToAddr': remote_address_list[i],
-                'ToUdpPort': st_int(remote_port_list[i], None),
-                'UdpPort': st_int(own_port_list[i], None)
+            'InternalAddrs': [{
+                'Public': [{
+                    'Addr': address_list[i],
+                    'L4Port': st_int(port_list[i], None),
+                }],
+                # TODO(jonghoonkwon): Put the 'Bind' field after web UI
+                # provides internal address & port information
+            }],
+            'Interfaces': {
+                st_int(if_id_list[i], None): {
+                    'Bandwidth': st_int(bandwidth_list[i], None),
+                    'ISD_AS': remote_name_list[i],
+                    'LinkType': interface_type_list[i],
+                    'InternalAddrIdx': 0,
+                    'MTU': st_int(link_mtu_list[i], None),
+                    'Overlay': 'UDP/IPv4',
+                    'Public': {
+                        'Addr': interface_list[i],
+                        'L4Port': st_int(own_port_list[i], None),
+                    },
+                    # TODO(jonghoonkwon): Put the 'Bind' field after web UI
+                    # provides internal address & port information
+                    'Remote': {
+                        'Addr': remote_address_list[i],
+                        'L4Port': st_int(remote_port_list[i], None),
+                    }
+                }
             }
         }
     return ret_dict
@@ -933,6 +966,7 @@ def generate_topology(request):
                         None)  # remove csrf entry, as we don't need it here
 
     topo_dict = {}
+    topo_dict_json = {}
     tp = topology_params
     isd_as = tp['inputISD_AS']
     isd_id, as_id = isd_as.split('-')
@@ -942,8 +976,8 @@ def generate_topology(request):
                      'PathServer', 'SibraServer']
 
     for s_type in service_types:
-        section_name = s_type+'s'
-        topo_dict[section_name] = \
+        service_name = s_type[:-2] + 'ice'
+        topo_dict[service_name] = \
             name_entry_dict(tp.getlist('input{}Name'.format(s_type)),
                             tp.getlist('input{}Address'.format(s_type)),
                             tp.getlist('input{}Port'.format(s_type)),
@@ -954,40 +988,51 @@ def generate_topology(request):
     topo_dict['BorderRouters'] = name_entry_dict_router(tp)
     topo_dict['ISD_AS'] = tp['inputISD_AS']
     topo_dict['MTU'] = st_int(tp['inputMTU'], DEFAULT_MTU)
+    topo_dict['Overlay'] = 'UDP/IPv4'
 
     # Zookeeper special case
     s_type = 'ZookeeperServer'
-    zk_dict = name_entry_dict(tp.getlist('input{}Name'.format(s_type)),
-                              tp.getlist('input{}Address'.format(s_type)),
-                              tp.getlist('input{}Port'.format(s_type)),
-                              tp.getlist(
-                                  'input{}InternalAddress'.format(s_type)),
-                              tp.getlist('input{}InternalPort'.format(s_type)),
-                              )
+    zk_dict = name_entry_dict_zk(tp.getlist('input{}Name'.format(s_type)),
+                                 tp.getlist('input{}Address'.format(s_type)),
+                                 tp.getlist('input{}Port'.format(s_type)),
+                                 tp.getlist(
+                                    'input{}InternalAddress'.format(s_type)),
+                                 tp.getlist('input{}InternalPort'.format(s_type)),
+                                 )
     named_keys = list(zk_dict.keys())  # copy 'named' keys
     int_key = 1  # dict keys get replaced with numeric keys, 1 based
     for key in named_keys:
         zk_dict[int_key] = zk_dict.pop(key)
         int_key += 1
 
-    topo_dict['Zookeepers'] = zk_dict
+    topo_dict['ZookeeperService'] = zk_dict
 
     # IP:port uniqueness in AS check
     all_ip_port_pairs = []
-    for r in ['BeaconServers', 'CertificateServers',
-              'PathServers', 'SibraServers', 'Zookeepers']:
+    for r in ['BeaconService', 'CertificateService',
+              'PathService', 'SibraService']:
         servers_of_type_r = topo_dict[r]
         for server in servers_of_type_r:
-            curr_pair = servers_of_type_r[server]['Addr'] + ':' + str(
-                servers_of_type_r[server]['Port'])
+            for i in range(len(servers_of_type_r[server]['Public'])):
+                curr_pair = servers_of_type_r[server]['Public'][i]['Addr'] + ':' + str(
+                    servers_of_type_r[server]['Public'][i]['L4Port'])
             all_ip_port_pairs.append(curr_pair)
+    for server in topo_dict['ZookeeperService']:
+        curr_pair = topo_dict['ZookeeperService'][server]['Addr'] + ':' + str(
+            topo_dict['ZookeeperService'][server]['L4Port'])
+        all_ip_port_pairs.append(curr_pair)
     if len(all_ip_port_pairs) != len(set(all_ip_port_pairs)):
         return JsonResponse(
             {'data': 'IP:port combinations not unique within AS'})
 
     os.makedirs(static_tmp_path, exist_ok=True)
+    #with open(yaml_topo_path, 'w') as file:
+    #    yaml.dump(topo_dict, file, default_flow_style=False)
+    with open(json_topo_path, 'w') as file:
+        json.dump(topo_dict, file, indent=2)
+    topo_dict_yaml = _topo_json_to_yaml(topo_dict)
     with open(yaml_topo_path, 'w') as file:
-        yaml.dump(topo_dict, file, default_flow_style=False)
+        yaml.dump(topo_dict_yaml, file, default_flow_style=False)
 
     create_local_gen(isd_as, topo_dict)
     commit_hash = tp['commitHash']
