@@ -160,6 +160,8 @@
   <script>
     reloadedTopology = '{{ reloaded_topology }}';
     reloadedTopology = parseTopology(reloadedTopology);
+    console.log(reloadedTopology['BorderRouters']);
+    console.log("calling set Loaded Topology");
     setLoadedTopology(reloadedTopology);
   </script>
 
