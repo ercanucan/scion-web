@@ -4,6 +4,7 @@
   <tr>
     <th></th>
     <th class="col-md-3">Address</th>
+    <th class="col-md-3">Port</th>
   </tr>
   </thead>
   <tbody>
@@ -14,6 +15,7 @@
           <tr id="{{ server.id_str }}">
             <td> {{ server.name }}</td>
             <td>{{ addr.addr }}</td>
+            <td>{{ addr.port }}</td>
           </tr>
         {% endif%}
       {% endfor %}
