@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import yaml
-from copy import deepcopy
 from shutil import rmtree
 from string import Template
 
@@ -144,7 +143,9 @@ def prep_supervisord_conf(instance_dict, executable_name, service_type, instance
     env_tmpl = 'PYTHONPATH=.,ZLOG_CFG="%s/%s.zlog.conf"'
     if service_type == 'router':  # go router
         env_tmpl += ',GODEBUG="cgocheck=0"'
-        prom_addr = "%s:%s" % (instance_dict['Addr'], instance_dict['Port'] + PROM_BR_PORT_OFFSET)
+        prom_addr = "%s:%s" % (instance_dict['InternalAddrs'][0]['Public'][0]['Addr'],
+                               instance_dict['InternalAddrs'][0]['Public'][0]['L4Port'] +
+                               PROM_BR_PORT_OFFSET)
         cmd = ('bash -c \'exec bin/%s -id "%s" -confd "%s" -prom "%s" &>logs/%s.OUT\'') % (
             executable_name, instance_name, get_elem_dir(GEN_PATH, isd_as, instance_name),
             prom_addr, instance_name)

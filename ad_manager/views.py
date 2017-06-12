@@ -882,7 +882,7 @@ def name_entry_dict(name_l, address_l, port_l, addr_int_l, port_int_l):
         ret_dict[name_l[i]] = {
             'Public': [{
                 'Addr': address_l[i],
-                'L4Port': st_int(port_l[i],SCION_SUGGESTED_PORT),
+                'L4Port': st_int(port_l[i], SCION_SUGGESTED_PORT),
             }]
         }
         if addr_int_l[i] is not '':
@@ -964,7 +964,6 @@ def generate_topology(request):
                         None)  # remove csrf entry, as we don't need it here
 
     topo_dict = {}
-    topo_dict_json = {}
     tp = topology_params
     isd_as = tp['inputISD_AS']
     isd_id, as_id = isd_as.split('-')
@@ -1024,8 +1023,6 @@ def generate_topology(request):
             {'data': 'IP:port combinations not unique within AS'})
 
     os.makedirs(static_tmp_path, exist_ok=True)
-    #with open(yaml_topo_path, 'w') as file:
-    #    yaml.dump(topo_dict, file, default_flow_style=False)
     with open(json_topo_path, 'w') as file:
         json.dump(topo_dict, file, indent=2)
     topo_dict_yaml = _topo_json_to_yaml(topo_dict)

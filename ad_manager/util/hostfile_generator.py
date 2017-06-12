@@ -148,7 +148,7 @@ def get_section_addr(mockup_dict, section_name):
             for i in range(len(section[sec_id]['InternalAddrs'])):
                 for j in range(len(section[sec_id]['InternalAddrs'][i]['Public'])):
                     ret_val.append((sec_id,
-                        section[sec_id]['InternalAddrs'][i]['Public'][j]['Addr']))
+                                    section[sec_id]['InternalAddrs'][i]['Public'][j]['Addr']))
     return ret_val
 
 

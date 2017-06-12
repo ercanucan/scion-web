@@ -160,12 +160,11 @@ class AD(models.Model):
                     if attr not in router['InternalAddrs'][i].keys():
                         continue
                     for j in range(len(router['InternalAddrs'][i][attr])):
-                        br_addr_obj, _ = BorderRouterAddress.objects.\
-                        update_or_create(
+                        br_addr_obj, _ = BorderRouterAddress.objects.update_or_create(
                             addr=router['InternalAddrs'][i][attr][j]['Addr'],
                             port=router['InternalAddrs'][i][attr][j]['L4Port'],
                             addr_type="IPv4",
-                            is_public=(attr=='Public'),
+                            is_public=(attr == 'Public'),
                             router=br_obj,
                             ad=self
                         )
@@ -196,7 +195,7 @@ class AD(models.Model):
 
     def fill_service_info(self, service_dict):
         """
-        Update the service information in the database. 
+        Update the service information in the database.
         (i.e., Service and ServiceAddress tables.)
         : param dict service_dict: (e.g., topo_dict['BeaconService'])
         """
@@ -208,12 +207,11 @@ class AD(models.Model):
                 if attr not in service.keys():
                     continue
                 for i in range(len(service[attr])):
-                    srv_addr_obj, _ = ServiceAddress.objects.\
-                    update_or_create(
+                    srv_addr_obj, _ = ServiceAddress.objects.update_or_create(
                         addr=service[attr][i]["Addr"],
                         port=service[attr][i]["L4Port"],
                         addr_type="IPv4",
-                        is_public=(attr=='Public'),
+                        is_public=(attr == 'Public'),
                         service=srv_obj,
                         ad=self
                     )
