@@ -150,7 +150,6 @@ function toggleInput(elem) {
 
 function setLoadedTopology(reloadedTopology) {
 
-    console.log("inside set loaded topology");
     var isCore = reloadedTopology['Core'] == 'True';
     $('#inputIsCore.shownCheckbox').prop('checked', isCore);
     delete reloadedTopology['Core'];
@@ -163,7 +162,6 @@ function setLoadedTopology(reloadedTopology) {
 
     for (var entryKey in reloadedTopology) {
         if (entryKey.endsWith("Service") && !entryKey.startsWith("Zookeeper")) {
-            console.log(entryKey)
             reloadServiceSection(reloadedTopology, entryKey);
             delete reloadedTopology[entryKey]; // remove entry
         }
@@ -178,7 +176,6 @@ function setLoadedTopology(reloadedTopology) {
 
 function reloadServiceSection(reloadedTopology, entryKey) {
 
-    console.log("inside set reload service section");
     var names;
     var name;
 
@@ -190,12 +187,10 @@ function reloadServiceSection(reloadedTopology, entryKey) {
 
     var entry = reloadedTopology[entryKey];
     var type = entryKey.slice(0, -7); // remove the 'Service' part
-    console.log("type" + type)
     names = Object.keys(entry); // get a list of keys
 
     for (var i in names) {
         name = names[i];
-        console.log(name);
         if (i > 0) {
             // if more than one entry, create additional form input
             $('.' + type + 'Item' + ':last').find('.btn-success').click();
@@ -265,10 +260,8 @@ function reloadRouterSection(reloadedTopology) {
 
 function reloadRouterInterfaceSection(if_id, interface_obj, itemSelector) {
     for (var interfaceKey in interface_obj) {
-        console.log(interfaceKey)
         var value = interface_obj[interfaceKey];
         $(itemSelector + '#inputInterfaceIFID').attr('value', if_id);
-        console.log(value)
         switch (interfaceKey) {
             case 'ISD_AS':
                 $(itemSelector + '#inputInterfaceRemoteName').attr('value', value);
@@ -298,8 +291,8 @@ function reloadRouterInterfaceSection(if_id, interface_obj, itemSelector) {
             case 'Bandwidth':
                 $(itemSelector + '#inputInterfaceBandwidth').attr('value', value);
                 break;
-            default: // Addr, Bandwidth, IFID
-                //$(itemSelector + '#inputInterface' + interfaceKey).attr('value', value);
+            // TODO(ercanucan): Futher items to be shown once the front-end is updated
+            default:
                 break;
         }
     }
